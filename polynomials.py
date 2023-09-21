@@ -1,87 +1,5 @@
 import numpy as np
-
-
-class Generator:
-    def __init__(self, name, id=None, grading=0):
-        self.id = id or name
-        self.name = name
-        self.grading = grading
-
-    def __eq__(self, other):
-        return self.name == other.name
-
-    def __str__(self):
-        return self.name
-
-
-class BaseRing:
-    def __init__(self, name, one, zero, valid_check=None, units_check=None):
-        self.name = name
-        self.add = lambda x, y: x + y
-        self.multiply = lambda x, y: x * y
-        self.negate = lambda x: -x
-        self.one = one
-        self.zero = zero
-        if valid_check is not None:
-            self.valid_check = lambda x: valid_check(x) or x.of == name
-        else:
-            self.valid_check = lambda x: x.of == name
-
-        if units_check is not None:
-            self.units_check = units_check
-        else:
-            self.units_check = lambda x: False if x == zero else None
-
-    def __str__(self):
-        return self.name
-
-    def isunit(self):
-        return self.units_check(self)
-
-
-
-class Field(BaseRing):
-    def __init__(self, name, one, zero, valid_check):
-        super().__init__(name, one, zero, valid_check, lambda x: x != zero)
-
-
-Z = BaseRing('Z', 1, 0, lambda x: isinstance(x, int), lambda x: abs(x) == 1)
-R = Field('R', 1, 0, lambda x: isinstance(x, (int, float)))
-Q = Field('Q', 1, 0, lambda x: isinstance(x, int))
-C = Field('C', 1, 0, lambda x: isinstance(x, (int, float)))
-
-
-class AlgebraElement:
-    def __init__(self, algebra, polynomial):
-        self.algebra = algebra
-        self.polynomial = polynomial
-
-    def __add__(self, other):
-        if self.algebra != other.algebra:
-            raise ValueError('Elements must be in the same algebra')
-        return AlgebraElement(self.algebra, self.polynomial + other.polynomial)
-
-    def __sub__(self, other):
-        if self.algebra != other.algebra:
-            raise ValueError('Elements must be in the same algebra')
-        return AlgebraElement(self.algebra, self.polynomial - other.polynomial)
-
-    def __mul__(self, other):
-        if self.algebra != other.algebra:
-            raise ValueError('Elements must be in the same algebra')
-        return AlgebraElement(self.algebra, self.polynomial * other.polynomial)
-
-    def __eq__(self, other):
-        if self.algebra != other.algebra:
-            if self.algebra == other.algebra.base_ring:
-                return self == other.polynomial.constant_term
-            if other.algebra == self.algebra.base_ring:
-                return self.polynomial.constant_term == other
-            return False
-        return self.polynomial == other.polynomial
-
-    def __str__(self):
-        return str(self.polynomial)
+from base_rings import *
 
 
 class Monomial:
@@ -191,11 +109,11 @@ class Monomial:
         return True
 
     @staticmethod
-    def create_one(no_variables, coef_ring=C):
+    def create_one(no_variables, coef_ring=Q):
         return Monomial(coef_ring.one, [0] * no_variables, coef_ring)
 
     @staticmethod
-    def create_zero(no_variables, coef_ring=C):
+    def create_zero(no_variables, coef_ring=Q):
         return Monomial(coef_ring.zero, [0] * no_variables, coef_ring)
 
     def __truediv__(self, other):

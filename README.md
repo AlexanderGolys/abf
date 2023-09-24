@@ -12,7 +12,7 @@
 ### k-algebras
 - Long division for multivariable polynomials
 - Computing S-polynomials
-- Computing the Groebner basis
+- Computing Groebner basis
 - Finding minimal generating set for ideals
 - Checking if element belongs to ideal
 - Computing the leading monomial ideal

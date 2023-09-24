@@ -3,60 +3,9 @@ import functools, itertools
 import numpy as np
 
 
-class BaseElement:
-    def __init__(self, ring, value, name=None):
-        self.ring = ring
-        self.value = value
-        self.name = name or str(value)
-
-    def __str__(self):
-        return self.name
-
-    def __add__(self, other):
-        return self.ring.add(self, other)
-
-    def __mul__(self, other):
-        return self.ring.mul(self, other)
-
-    def __neg__(self):
-        return self.ring.neg(self)
-
-    def __eq__(self, other):
-        return self.ring.eq(self, other)
-
-    def __ne__(self, other):
-        return not self.ring.eq(self, other)
-
-    def __sub__(self, other):
-        return self.ring.add(self, -other)
-
-    def __truediv__(self, other):
-        return self.ring.truediv(self, other)
-
-    def __floordiv__(self, other):
-        return self.ring.longdiv(self, other)
-
-    def __mod__(self, other):
-        return self.ring.mod(self, other)
-
-    def __pow__(self, other):
-        return functools.reduce(lambda x, y: x * y, [self] * other)
-
-    def __abs__(self):
-        return self.ring.abs(self)
-
-    @functools.cached_property
-    def grad(self):
-        return self.ring.grad(self)
-
-
-class Z(BaseRing):
-    name = "Z"
-    pid = True
-    euclidean = True
-    integral = True
-    ufd = True
-    normed = True
+class ZRing(BaseRing):
+    def __init__(self):
+        super().__init__(name='Z', euclidean=True, integral=True, pid=True, ufd=True, normed=True)
 
     def __call__(self, integer):
         return BaseElement(self, integer)
@@ -67,9 +16,11 @@ class Z(BaseRing):
     def mul(self, a, b):
         return self(a.value * b.value)
 
+    @property
     def one(self):
         return self(1)
 
+    @property
     def zero(self):
         return self(0)
 
@@ -78,6 +29,9 @@ class Z(BaseRing):
 
     def eq(self, a, b):
         return a.value == b.value
+
+    def mod(self, a, b):
+        raise NotImplementedError("Divisibility check is not implemented.")
 
     def maybe_unit_check(self, element):
         return element.value == 1 or element.value == -1
@@ -93,16 +47,16 @@ class Z(BaseRing):
 
     def truediv(self, a, b):
         if self.force_zero_check(a) and not self.force_zero_check(b):
-            return self.zero()
+            return self.zero
         if self.force_zero_check(b) and self.force_zero_check(a):
             raise ValueError("0/0")
-        if a % b != 0:
+        if a.value % b.value != 0:
             raise ValueError(f"{b} not divisible by {a}")
         return self(a.value // b.value)
 
     def longdiv(self, a, b):
         if self.force_zero_check(a) and not self.force_zero_check(b):
-            return self.zero(), self.zero()
+            return self.zero, self.zero
         if self.force_zero_check(b) and self.force_zero_check(a):
             raise ValueError("0/0")
         return self(a.value // b.value), self(a.value % b.value)
@@ -113,20 +67,14 @@ class Z(BaseRing):
     def abs(self, a):
         return self(abs(a.value))
 
+    @staticmethod
+    def element_str(element):
+        return str(element.value)
 
-class Q(Field):
-    field = True
-    name = "Q"
-    euclidean = True
-    integral = True
-    pid = True
-    ufd = True
-    local = True
-    artinian = True
-    normed = True
 
+class QField(Field):
     def __init__(self):
-        super().__init__([Z])
+        super().__init__([ZRing()], 'Q', characteristics=0, normed=True)
 
     def __call__(self, numerator, denominator=1):
         if denominator == 0:
@@ -148,9 +96,11 @@ class Q(Field):
     def mul(self, a, b):
         return self(a.value[0] * b.value[0], a.value[1] * b.value[1])
 
+    @property
     def one(self):
         return self(1)
 
+    @property
     def zero(self):
         return self(0)
 
@@ -172,21 +122,26 @@ class Q(Field):
         return self(a.value[0] * b.value[1], a.value[1] * b.value[0])
 
     def from_canonical_subring(self, element):
-        if element.ring == Z:
+        if element.ring == ZRing:
             return self(element.value)
-        if element.ring == Q:
+        if element.ring == QField:
             return element
         raise ValueError("Only canonical subrings are Z and Q.")
 
     def abs(self, element):
         return abs(element.value[0]/element.value[1])
 
+    @staticmethod
+    def element_str(element):
+        if element.value[1] == 1:
+            return str(element.value[0])
+        return str(element.value[0]) + '/' + str(element.value[1])
+
 
 class RFloating(Field):
-    name = "R"
 
     def __init__(self):
-        super().__init__([Q, Z])
+        super().__init__([QField(), ZRing()], 'R', exact_values=False, characteristics=0, normed=True)
 
     def __call__(self, value, denominator=1):
         return BaseElement(self, value/denominator)
@@ -210,29 +165,39 @@ class RFloating(Field):
         return self(a.value / b.value)
 
     def from_canonical_subring(self, element):
-        if element.ring == Z:
+        if element.ring == ZRing():
             return self(element.value)
-        if element.ring == Q:
+        if element.ring == QField():
             return self(element.value[0]/element.value[1])
-        if element.ring == RFloating:
+        if element.ring == RFloating():
             return element
         raise ValueError("Only canonical subrings are Z, Q and R.")
 
     def abs(self, element):
         return abs(element.value)
 
+    @property
     def one(self):
         return self(1)
 
+    @property
     def zero(self):
         return self(0)
 
     def eq(self, a, b):
         return np.isclose(a.value, b.value)
 
+    @staticmethod
+    def element_str(element):
+        return str(element.value)
+
 
 class CFloating(RFloating):
-    name = "C"
+    def __init__(self):
+        super().__init__()
+        self.canonical_subrings = [ZRing(), QField(), RFloating()]
+        self.name = 'C'
+        self.properties['normal'] = True
 
     def __call__(self, real, imaginary=0, denominator=1):
         return BaseElement(self, complex(real, imaginary)/denominator)

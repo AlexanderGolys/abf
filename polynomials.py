@@ -18,6 +18,9 @@ class MonomialOrder:
     def __eq__(self, other):
         return self.name == other.name
 
+    def sort(self, monomials):
+        return sorted(monomials, key=functools.cmp_to_key(lambda x, y: self(x, y)), reverse=True)
+
 
 def lex_comp(l1, l2):
     diff = l1 - l2
@@ -115,7 +118,7 @@ class Monomial:
     def compare(self, other, order):
         return order(self, other)
 
-    def check_divisibility(self, other):
+    def divisible_by(self, other):
         if self.ring != other.ring:
             raise ValueError('Monomials must be in the same coefficient ring')
         if self.no_variables != other.no_variables:
@@ -124,6 +127,9 @@ class Monomial:
         if np.any(diff < 0):
             return False
         return True
+
+    def divides(self, other):
+        return other.divisible_by(self)
 
     # def __mod__(self, other):
     #     return self.check_divisibility(other)
@@ -141,7 +147,7 @@ class Monomial:
             raise ValueError('Monomials must be in the same coefficient ring')
         if self.no_variables != other.no_variables:
             raise ValueError('Monomials must have the same number of variables')
-        if not self.check_divisibility(other):
+        if not self.divisible_by(other):
             raise ValueError('Divisor must divide dividend')
         if other.coefficient == self.ring.zero:
             raise ZeroDivisionError('Coefficient is zero')
@@ -153,9 +159,6 @@ class Monomial:
         if other == 0 and self.degree == -1:
             raise ValueError('0^0 is undefined')
         return Monomial(self.coefficient ** other, self.exponent_index * other, self.var_names)
-
-    def __eq__(self, other):
-        return self.ring == other.ring and self.coefficient == other.coefficient and np.array_equal(self.exponent_index, other.exponent_index)
 
 
 class Polynomial:

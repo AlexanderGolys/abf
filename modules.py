@@ -1,3 +1,5 @@
+import warnings
+
 from abstract import *
 from polynomials import *
 from algebras import *
@@ -23,11 +25,15 @@ class Ideal(FGModule):
     def as_ring_element(self, element):
         return sum([c * g for c, g in zip(element.coefficients, self.generators)], start=self.ring.zero)
 
+    def quotient_algebra(self):
+        return QuotientAlgebra(self.ring, self)
+
 
 class PolynomialIdeal(Ideal):
     def __init__(self, generators, name="", groebner=None, **properties):
         super().__init__(generators, name=name, **properties)
         self.groebner_basis = groebner
+        self.order = self.ring.order
 
     def info(self):
         print(self.name + ': finitely generated ' + str(self.ring) + '-module')
@@ -39,8 +45,9 @@ class PolynomialIdeal(Ideal):
         print()
 
 
+
 class KPolynomialIdeal(PolynomialIdeal):
-    def __init__(self, generators, name="", groebner=None, find_groebner=True, **properties):
+    def __init__(self, generators, name="", groebner=None, find_groebner=False, **properties):
         super().__init__(generators, name=name, groebner=groebner, **properties)
         if find_groebner:
             self.to_groebner()
@@ -58,6 +65,58 @@ class KPolynomialIdeal(PolynomialIdeal):
         self.groebner_basis = None
         self.to_groebner()
 
+    def check_if_groebner_minimal(self):
+        if self.groebner_basis is None:
+            return False
+        for i, p in enumerate(self.groebner_basis):
+            if p.value.leading_coefficient() != 1:
+                return False
+            for g in self.groebner_basis[i+1:]:
+                if g.value.leading_monomial().divisible_by(p.value.leading_monomial()):
+                    return False
+                if p.value.leading_monomial().divisible_by(g.value.leading_monomial()):
+                    return False
+        return True
+
+    def check_if_groebner_reduced(self):
+        if self.groebner_basis is None:
+            return False
+        for i, p in enumerate(self.groebner_basis):
+            leading_monomial = p.value.leading_monomial()
+            if leading_monomial.coefficient != 1:
+                return False
+            for g in self.groebner_basis[:i] + self.groebner_basis[i+1:]:
+                for m in g.value.monomials:
+                    if m.divisible_by(leading_monomial):
+                        return False
+        return True
+
+    def reduce_wrt_family(self, f, g, F=None):
+        if F is None:
+            F = self.groebner_basis
+        lm_f, lm_g = f.value.leading_monomial(), g.value.leading_monomial()
+        if lm_f.lcm(lm_g) == lm_f*lm_g:
+            return self.ring.zero
+        return self.ring.multi_long_div(self.S_polynomial(f, g), F)[1]
+
+    def groebner_to_minimal(self):
+        minimal = []
+        for p in self.groebner_basis:
+            complement = [g for g in self.groebner_basis if g != p]
+            if not p != 0 and self.reminder_wrt_family(p, complement) == self.ring.zero:
+                minimal.append(p/p.value.leading_coefficient())
+        self.groebner_basis = minimal
+
+    def groebner_to_reduced(self):
+        self.groebner_to_minimal()
+        G = self.groebner_basis
+        H = []
+        for i, p in enumerate(G):
+            h = self.reminder_wrt_family(p, H + G[:i+1])
+            H.append(h)
+        self.groebner_basis = H
+        self.order.sort(self.groebner_basis)
+
     def to_groebner(self):
         if self.groebner_basis is not None:
             return
@@ -70,21 +129,27 @@ class KPolynomialIdeal(PolynomialIdeal):
         pairs = list(itertools.combinations(basis, 2))
         while pairs:
             f, g = pairs.pop()
-            h = self.S_polynomial(f, g)
-            r = self.reminder_wrt_family(h, basis)
-            if r != self.ring.zero:
-                pairs += [(r, b) for b in basis]
-                basis.append(r)
+            reminder = self.reduce_wrt_family(f, g, basis)
+            if reminder != 0:
+                pairs += [(reminder, b) for b in basis]
+                basis.append(reminder)
         self.groebner_basis = basis
+        self.groebner_to_reduced()
 
     def convert_basis_to_groebner(self):
         if self.groebner_basis is None:
             self.to_groebner()
         return self.__class__(self.groebner_basis, name=self.name, groebner=self.groebner_basis, find_groebner=False, **self.properties)
 
-    def check_if_basis_groebner(self):
-        for f, g in zip(self.generators):
-            if f != g and self.S_polynomial(f, g) != self.ring.zero:
+    def check_if_basis_groebner(self, basis=None):
+        if basis is None:
+            basis = self.generators
+        pairs = list(itertools.combinations(basis, 2))
+        while pairs:
+            f, g = pairs.pop()
+            h = self.S_polynomial(f, g)
+            r = self.reminder_wrt_family(h, basis)
+            if r != self.ring.zero:
                 return False
         return True
 
@@ -99,6 +164,9 @@ class KPolynomialIdeal(PolynomialIdeal):
     def check_if_belongs(self, element):
         self.to_groebner()
         return self.groebner_reminder(element) == self.ring.zero
+
+    def __contains__(self, item):
+        return self.check_if_belongs(item)
 
     def _reduce_basis(self):
         if self.no_generators < 2:
@@ -120,8 +188,23 @@ class KPolynomialIdeal(PolynomialIdeal):
         self.to_groebner()
         return KMonomialIdeal(*[g.value.leading_monomial() for g in self.groebner_basis])
 
-    def in_ideal(self):
+    def leading_ideal(self):
         return self.leading_monomial_ideal().to_ideal()
+
+    def __eq__(self, other):
+        if not isinstance(other, KPolynomialIdeal):
+            return False
+        if self.groebner_basis is None:
+            self.to_groebner()
+        if other.groebner_basis is None:
+            other.to_groebner()
+        if self.order != other.order:
+            warnings.warn('Ideals are not equal due to different orders.')
+            return False
+        return self.groebner_basis == other.groebner_basis
+
+    def quotient_algebra(self):
+        return QuotientKAlgebra(self.ring, self)
 
 
 class KMonomialIdeal:
@@ -133,9 +216,15 @@ class KMonomialIdeal:
             else:
                 generators.append(m)
         self.monomials = generators
+        self.monomials = [m/m.coefficient for m in self.monomials if m.coefficient != 0]
 
     def to_ideal(self):
         return KPolynomialIdeal(*[Polynomial(m) for m in self.monomials])
+
+    def __contains__(self, item):
+        return any([item.value.divisible_by(m) for m in self.monomials])
+
+
 
 
 

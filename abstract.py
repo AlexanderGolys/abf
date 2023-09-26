@@ -201,6 +201,10 @@ class BaseElement:
         return self.ring.neg(self)
 
     def __eq__(self, other):
+        if other == 0:
+            return self == self.ring.zero
+        if other == 1:
+            return self == self.ring.one
         return self.ring.eq(self, other)
 
     def __ne__(self, other):
@@ -285,7 +289,6 @@ class FGModule(ABC):
         print()
 
 
-
 class ModuleElement:
     def __init__(self, module, coefficients):
         self.ring = coefficients[0].ring
@@ -310,6 +313,8 @@ class ModuleElement:
         return self.module.scalar_mul(self, -self.ring.one())
 
     def __eq__(self, other):
+        if other == 0:
+            return self == self.module.zero
         return self.coefficients == other.coefficients
 
     def __ne__(self, other):

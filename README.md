@@ -4,6 +4,7 @@
 - Finitely generated algebras
 - Polynomials, monomials
 - Polynomial algebras
+- Quotient algebras
 - Modules
 - Ideals, monomial ideals
 - Matrices
@@ -17,4 +18,5 @@
 - Checking if element belongs to ideal
 - Computing the leading monomial ideal
 - Reading relations from matrix equation
+- Equality of ideals
 

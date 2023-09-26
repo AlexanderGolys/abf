@@ -128,7 +128,7 @@ class KPolynomialAlgebra(PolynomialAlgebra, KAlgebraFP):
             i = 0
             occurred = False
             while i < len(g_list) and not occurred:
-                if g_list[i] != self.zero and p.value.leading_monomial().check_divisibility(g_list[i].value.leading_monomial()):
+                if g_list[i] != self.zero and p.value.leading_monomial().divisible_by(g_list[i].value.leading_monomial()):
                     occurred = True
                     quotient = self(p.value.leading_monomial() / g_list[i].value.leading_monomial())
                     a[i] = a[i] + quotient
@@ -192,7 +192,19 @@ class Matrix:
             return (self@self)**(power//2)
         return self@(self@self)**((power-1)//2)
 
+    def zero_matrix(self, no_rows, no_columns):
+        return Matrix([[self.ring.zero for j in range(no_columns)] for i in range(no_rows)])
+
+    def identity_matrix(self, no_rows):
+        return Matrix([[self.ring.one if i == j else self.ring.zero for j in range(no_rows)] for i in range(no_rows)])
+
     def __eq__(self, other):
+        if other == 0:
+            return self == self.zero_matrix(self.no_rows, self.no_columns)
+        if other == 1:
+            return self.is_square and self == self.identity_matrix(self.no_rows)
+        if self.no_rows != other.no_rows or self.no_columns != other.no_columns:
+            return False
         return all([self.coefficients[i][j] == other.coefficients[i][j] for i in range(self.no_rows) for j in range(self.no_columns)])
 
     def __ne__(self, other):
@@ -214,6 +226,34 @@ class Matrix:
     def trace(self):
         assert self.is_square
         return sum([self.coefficients[i][i] for i in range(self.no_rows)])
+
+
+class QuotientAlgebra(AlgebraFP):
+    def __init__(self, ideal, name=None):
+        if name is None:
+            name = str(ideal.ring) + '/' + ideal.name
+        super().__init__(name, ideal.ring, ideal.ring.generators, ideal.generators)
+        self.ideal = ideal
+
+    @staticmethod
+    def element_str(element):
+        return str(element.value) + ' + ' + str(element.ideal)
+
+
+class QuotientKAlgebra(QuotientAlgebra):
+    def __call__(self, polynomial):
+        if isinstance(polynomial, Monomial):
+            return BaseElement(self, Polynomial(polynomial, order=self.order))
+        polynomial.order = self.order
+        if self.ideal.groebner_basis is not None:
+            polynomial = self.ideal.groebner_reminder(polynomial)
+        else:
+            polynomial = self.ideal.reminder_wrt_family(polynomial, self.ideal.generators)
+        return BaseElement(self, polynomial)
+
+
+
+
 
 
 

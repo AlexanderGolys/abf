@@ -28,6 +28,10 @@ class Ideal(FGModule):
     def quotient_algebra(self):
         return QuotientAlgebra(self.ring, self)
 
+    @staticmethod
+    def zero_deal(ring):
+        return Ideal([ring.zero], name='(0)')
+
 
 class PolynomialIdeal(Ideal):
     def __init__(self, generators, name="", groebner=None, **properties):

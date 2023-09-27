@@ -60,12 +60,13 @@ grevlex = MonomialOrder('grevlex', grevlex_comp)
 
 
 class Monomial:
-    def __init__(self, coefficient, generator_powers, var_names=None):
+    def __init__(self, coefficient, generator_powers, var_names=None, infinite_variables=False):
         self.ring = coefficient.ring
         self.coefficient = coefficient
         self.exponent_index = np.array(generator_powers).astype(int)
-        self.no_variables = len(generator_powers)
+        self.no_variables = len(generator_powers) if not infinite_variables else None
         self.degree = sum(self.exponent_index)
+        self.infinite_variables = infinite_variables
         if coefficient == self.ring.zero:
             self.degree = -1
             self.exponent_index = np.array([0] * self.no_variables)
@@ -92,9 +93,9 @@ class Monomial:
             return False
         if self.coefficient != other.coefficient:
             return False
-        if self.exponent_index != other.exponent_index:
-            return False
-        return True
+        if self.no_variables is None or other.no_variables is None:
+            return list(self.exponent_index) + [self.ring.zero]*len(other.exponent_index) == list(other.exponent_index) + [self.ring.zero]*len(self.exponent_index)
+        return self.exponent_index == other.exponent_index
 
     def __mul__(self, other):
         assert isinstance(other, (Monomial, BaseElement))
@@ -102,26 +103,45 @@ class Monomial:
             return Monomial(self.coefficient * other, self.exponent_index, self.var_names)
         if self.ring != other.ring:
             raise ValueError('Monomials must be in the same coefficient ring')
+        if self.no_variables is None or other.no_variables is None:
+            return Monomial(self.coefficient * other.coefficient,
+                            np.array(list(self.exponent_index) + [self.ring.zero]*max(0, (len(other.exponent_index) - len(self.exponent_index))))
+                            + np.array(list(other.exponent_index) + [self.ring.zero]*max(0, (len(self.exponent_index) - len(other.exponent_index)))),
+                            self.var_names)
+
         return Monomial(self.coefficient*other.coefficient,
                         self.exponent_index + other.exponent_index,
                         self.var_names)
 
     def __call__(self, *args):
-        if len(args) != self.no_variables:
+        if self.no_variables is not None and len(args) != self.no_variables:
             raise ValueError('Wrong number of arguments')
+        if self.no_variables is None:
+            exponent_index = list(self.exponent_index) + [self.ring.zero]*max(0, len(args)-len(self.exponent_index))
+            return self.coefficient * np.prod([arg ** exp for arg, exp in zip(args, exponent_index)])
         return self.coefficient * np.prod([arg ** exp for arg, exp in zip(args, self.exponent_index)])
 
     @staticmethod
     def constant(coefficient, no_variables):
+        if no_variables is None:
+            return Monomial(coefficient, [0], infinite_variables=True)
         return Monomial(coefficient, [0] * no_variables)
 
+    def compatibilise_infinite_variables(self, other):
+        if self.infinite_variables and len(self.exponent_index) < len(other.exponent_index):
+            self.exponent_index = np.array(list(self.exponent_index) + [self.ring.zero]*(len(other.exponent_index) - len(self.exponent_index)))
+        if other.infinite_variables and len(other.exponent_index) < len(self.exponent_index):
+            other.exponent_index = np.array(list(other.exponent_index) + [other.ring.zero]*(len(self.exponent_index) - len(other.exponent_index)))
+
     def compare(self, other, order):
+        self.compatibilise_infinite_variables(other)
         return order(self, other)
 
     def divisible_by(self, other):
+        self.compatibilise_infinite_variables(other)
         if self.ring != other.ring:
             raise ValueError('Monomials must be in the same coefficient ring')
-        if self.no_variables != other.no_variables:
+        if self.no_variables != other.no_variables and not (self.infinite_variables or other.infinite_variables):
             raise ValueError('Monomials must have the same number of variables')
         diff = self.exponent_index - other.exponent_index
         if np.any(diff < 0):
@@ -129,23 +149,25 @@ class Monomial:
         return True
 
     def divides(self, other):
+        self.compatibilise_infinite_variables(other)
         return other.divisible_by(self)
-
-    # def __mod__(self, other):
-    #     return self.check_divisibility(other)
 
     @staticmethod
     def create_one(no_variables, coef_ring):
+        if no_variables is None:
+            return Monomial(coef_ring.one, [0], infinite_variables=True)
         return Monomial(coef_ring.one, [0] * no_variables)
 
     @staticmethod
     def create_zero(no_variables, coef_ring):
+        if no_variables is None:
+            return Monomial(coef_ring.zero, [0], infinite_variables=True)
         return Monomial(coef_ring.zero, [0] * no_variables)
 
     def __truediv__(self, other):
         if self.ring != other.ring:
             raise ValueError('Monomials must be in the same coefficient ring')
-        if self.no_variables != other.no_variables:
+        if self.no_variables != other.no_variables and not (self.infinite_variables or other.infinite_variables):
             raise ValueError('Monomials must have the same number of variables')
         if not self.divisible_by(other):
             raise ValueError('Divisor must divide dividend')
@@ -158,6 +180,8 @@ class Monomial:
             raise ValueError('Exponent must be a non-negative integer')
         if other == 0 and self.degree == -1:
             raise ValueError('0^0 is undefined')
+        if other == 0:
+            return Monomial.create_one(self.no_variables, self.ring)
         return Monomial(self.coefficient ** other, self.exponent_index * other, self.var_names)
 
 
@@ -169,6 +193,7 @@ class Polynomial:
         self.no_variables = self.monomials[0].no_variables
         self.order = order
         self.monomials = sorted(self.monomials, key=functools.cmp_to_key(lambda x, y: x.compare(y, order=self.order)), reverse=True)
+        self.infinite_variables = self.monomials[0].infinite_variables
         for i in range(len(self.monomials) - 1, 0, -1):
             if np.array_equal(self.monomials[i].exponent_index, self.monomials[i - 1].exponent_index):
                 self.monomials[i - 1].coefficient += self.monomials[i].coefficient

@@ -1,5 +1,6 @@
 from polynomials import *
-from modules import *
+import modules
+import arrows
 
 
 class Algebra(BaseRing):
@@ -50,6 +51,17 @@ class Algebra(BaseRing):
     def info(self):
         print(self.name + ': ' + str(self.base_ring) + '-algebra')
 
+    def localisation_at_element(self, element):
+        if element == self.zero:
+            return AlgebraFG('0', self.base_ring, [])
+        poly = Polynomial(Monomial(element, [1], ['t']), Monomial(-self.one, [0], ['t']))
+        free_alg = PolynomialAlgebra(self, 1, ['t'])
+        return modules.Ideal([free_alg(poly)]).quotient_algebra()
+
+    def localisation_morphism_at_element(self, element):
+        localisation = self.localisation_at_element(element)
+        return arrows.AlgebraMorphism(self, localisation, lambda x: x)
+
 
 class AlgebraFG(Algebra):
     def __init__(self, name, base_ring, generators, order=grlex, **properties):
@@ -61,6 +73,18 @@ class AlgebraFG(Algebra):
         print(self.name + ': finitely generated ' + str(self.base_ring) + '-algebra')
         print(str(self.no_generators) + ' generators')
 
+    @property
+    def one(self):
+        return self(Polynomial.create_one(self.no_generators, self.base_ring, self.order))
+
+    @property
+    def zero(self):
+        return self(Polynomial.create_zero(self.no_generators, self.base_ring, self.order))
+
+    @property
+    def generator_elements(self):
+        return [self(Polynomial(Monomial(self.base_ring.one, [1 if j == i else 0 for j in range(self.no_generators)], self.generators))) for i, g in enumerate(self.generators)]
+
 
 class AlgebraFP(AlgebraFG):
     def __init__(self, name, base_ring, generators, relations, order=grlex, **properties):
@@ -69,11 +93,14 @@ class AlgebraFP(AlgebraFG):
         self.no_relations = len(relations)
 
     def ideal(self, name=None):
-        return Ideal(self.relations, name)
+        return modules.Ideal(self.relations, name)
 
     def info(self):
         print(self.name + ': finitely presented ' + str(self.base_ring) + '-algebra')
         print(str(self.no_generators) + ' generators, ' + str(len(self.relations)) + ' relations')
+
+    def to_quotient_algebra(self):
+        return QuotientAlgebra(self.ideal(), name=self.name)
 
 
 class KAlgebraFP(AlgebraFP):
@@ -81,17 +108,20 @@ class KAlgebraFP(AlgebraFP):
         assert base_ring.properties['field']
         AlgebraFP.__init__(self, name, base_ring, generators, relations, order, **properties)
 
+    def to_quotient_algebra(self):
+        return QuotientKAlgebra(self.ideal(), name=self.name)
+
 
 class QuotientAlgebra(AlgebraFP):
     def __init__(self, ideal, name=None):
         if name is None:
-            name = str(ideal.ring) + '/' + ideal.name
-        super().__init__(name, ideal.ring, ideal.ring.generators, ideal.generators, order=ideal.order)
+            name = ideal.ring.name + '/' + ideal.name
+        super().__init__(name, ideal.ring.base_ring, ideal.ring.generators, ideal.generators, order=ideal.ring.order)
         self.ideal = ideal
 
     @staticmethod
     def element_str(element):
-        return str(element.value) + ' + ' + str(element.ideal)
+        return str(element.value) + ' + ' + str(element.ring.ideal)
 
 
 class QuotientKAlgebra(QuotientAlgebra, KAlgebraFP):
@@ -110,7 +140,7 @@ class QuotientKAlgebra(QuotientAlgebra, KAlgebraFP):
         return BaseElement(self, polynomial)
 
 
-class PolynomialAlgebra(QuotientAlgebra):
+class PolynomialAlgebra(AlgebraFP):
     def __init__(self, base_ring, no_variables, variable_names=None, order=grlex):
         if variable_names is None:
             if no_variables < 5:
@@ -124,7 +154,7 @@ class PolynomialAlgebra(QuotientAlgebra):
                           variable_names + base_ring.generators, order=order)
             return
 
-        AlgebraFP.__init__(self, name, base_ring, variable_names, [], order)
+        super().__init__(name, base_ring, variable_names, [], order)
         if self.no_generators == 1 and self.base_ring.properties['field']:
             self.properties['pid'] = True
         if self.base_ring.properties['ufd']:
@@ -133,10 +163,6 @@ class PolynomialAlgebra(QuotientAlgebra):
             self.properties['integral'] = True
         if self.base_ring.properties['noetherian']:
             self.properties['noetherian'] = True
-        super.__init__(Ideal.zero_deal(self), name)
-
-    def grad(self, element):
-        return element.value.degree
 
     def element_str(self, element):
         return str(element.value)
@@ -160,7 +186,7 @@ class PolynomialAlgebra(QuotientAlgebra):
 class KPolynomialAlgebra(PolynomialAlgebra, QuotientKAlgebra):
     def __init__(self, field, no_variables, variable_names=None, order=grlex):
         PolynomialAlgebra.__init__(self, field, no_variables, variable_names, order)
-        QuotientKAlgebra.__init__(self, Ideal.zero_deal(self), name=self.name)
+        QuotientKAlgebra.__init__(self, modules.Ideal.zero_ideal(self), name=self.name)
 
     def multi_long_div(self, f, g_list):
         a = [copy.copy(self.zero)]*len(g_list)
@@ -199,10 +225,10 @@ class Matrix:
 
     def __matmul__(self, other):
         assert self.no_columns == other.no_rows
-        return Matrix([[sum([self.coefficients[i][k] * other.coefficients[k][j] for k in range(self.no_columns)]) for j in range(other.no_columns)] for i in range(self.no_rows)])
+        return Matrix([[sum([self.coefficients[i][k] * other.coefficients[k][j] for k in range(self.no_columns)], self.ring.one) for j in range(other.no_columns)] for i in range(self.no_rows)])
 
     def vanishing_ideal_of_coefs(self):
-        return Ideal([self.coefficients[i][j] for i in range(self.no_rows) for j in range(self.no_columns)], name='vanishing ideal of coefficients')
+        return modules.Ideal([self.coefficients[i][j] for i in range(self.no_rows) for j in range(self.no_columns)], name='vanishing ideal of coefficients')
 
     def submatrix(self, rows, columns, keep=False):
         if isinstance(rows, int):
@@ -268,6 +294,52 @@ class Matrix:
     def trace(self):
         assert self.is_square
         return sum([self.coefficients[i][i] for i in range(self.no_rows)])
+
+    @staticmethod
+    def fill_free_coefficients(ring, *shapes, order=grlex):
+        matrices = []
+        shapes = [(n, n) if isinstance(n, int) else n for n in shapes]
+        no_vars = sum([s[0]*s[1] for s in shapes])
+        varnames = []
+        if len(shapes) < 5:
+            names = ['x', 'y', 'z', 'w'][:len(shapes)]
+            for shape, name in zip(shapes, names):
+                if shape[0] == shape[1] == 1:
+                    varnames += [name]
+                elif shape[0] == 1 or shape[1] == 1:
+                    varnames += [name + '_' + str(i) for i in range(max(shape[0], shape[1]))]
+                else:
+                    varnames += [name + '_' + str(i)+str(j) for i in range(shapes[0][0]) for j in range(shapes[0][1])]
+        else:
+            for k, shape in enumerate(shapes):
+                name = 'x_' + str(k)
+                if shape[0] == shape[1] == 1:
+                    varnames += [name]
+                elif shape[0] == 1 or shape[1] == 1:
+                    varnames += [name + '_' + str(i) for i in range(max(shape[0], shape[1]))]
+                else:
+                    varnames += [name + '_' + str(i)+str(j) for i in range(shapes[0][0]) for j in range(shapes[0][1])]
+        algebra = PolynomialAlgebra(ring, no_vars, varnames, order=order)
+
+        used_vars = 0
+        for shape in shapes:
+            coefficients = []
+            for i in range(shape[1]):
+                row = algebra.generator_elements[used_vars + i*shape[1]:used_vars + (i+1)*shape[1]]
+                coefficients.append(row)
+            used_vars += shape[0]*shape[1]
+            matrices.append(Matrix(coefficients))
+        return matrices
+
+    def vanishing_ideal(self, name=None):
+        coefs = sum(self.coefficients, [])
+        return modules.Ideal(coefs, name=name)
+
+    def vanishing_algebra(self, name=None):
+        return self.vanishing_ideal().quotient_algebra(name)
+
+
+
 
 
 

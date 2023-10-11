@@ -31,7 +31,7 @@ class ZRing(BaseRing):
         return a.value == b.value
 
     def mod(self, a, b):
-        raise NotImplementedError("Divisibility check is not implemented.")
+        return self(a.value % b.value)
 
     def maybe_unit_check(self, element):
         return element.value == 1 or element.value == -1
@@ -117,15 +117,15 @@ class QField(Field):
         return element.value[0] == 0
 
     def truediv(self, a, b):
-        if self.force_zero_check(b):
-            raise ZeroDivisionError
+        if b == self.zero:
+            raise ZeroDivisionError()
         return self(a.value[0] * b.value[1], a.value[1] * b.value[0])
 
     def from_canonical_subring(self, element):
-        if element.ring == ZRing:
-            return self(element.value)
-        if element.ring == QField:
+        if element.ring == QField():
             return element
+        if element.ring == ZRing():
+            return self(element.value)
         raise ValueError("Only canonical subrings are Z and Q.")
 
     def abs(self, element):

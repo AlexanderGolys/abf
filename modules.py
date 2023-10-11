@@ -1,20 +1,192 @@
 import warnings
 
-from abstract import *
-from polynomials import *
 from algebras import *
 from base_rings import *
+import arrows
+
+
+class Module:
+    def __init__(self, base_ring, name=None, no_generators=None, custom_mul=None, **properties):
+        assert isinstance(base_ring, BaseRing)
+        if custom_mul is None:
+            custom_mul = lambda c, g: c
+        self.name = name or 'G' + str(random.randint(0, 1000000))
+        self.custom_mul = custom_mul
+        self.ring = base_ring
+        self.properties = ModuleProperties(**properties)
+        self.no_generators = no_generators
+        self.generators = None
+        if self.no_generators == 1:
+            self.properties['cyclic'] = True
+        if self.no_generators == 0:
+            self.properties['zero'] = True
+        if self.ring.properties['field']:
+            self.properties['vector space'] = True
+
+    def __call__(self, coefficients_dict):
+        return ModuleElement(self, coefficients_dict)
+
+    @property
+    def zero(self):
+        return self({})
+
+    def __str__(self):
+        return self.name
+
+    def add(self, a, b):
+        new_value_dict = a.coefficients_dict.copy()
+        for g, c in b.coefficients_dict.items():
+            if g in new_value_dict:
+                new_value_dict[g] += c
+            else:
+                new_value_dict[g] = c
+        return self(new_value_dict)
+
+    def scalar_mul(self, element, scalar):
+        new_value_dict = {g: c*self.custom_mul(scalar, g) for g, c in element.coefficients_dict.items()}
+        return self(new_value_dict)
+
+    def grad(self, element):
+        if not self.properties['graded']:
+            return None
+        raise NotImplementedError("Gradation is not implemented.")
+
+    def to_ring_element(self):
+        raise NotImplementedError("Conversion to ring element is possible only for ideals.")
+
+    def info(self):
+        print(self.name + ': ' + str(self.ring) + '-module')
+        print(', '.join(filter(lambda x: self.properties[x], self.properties().keys())))
+        print()
+
+    @staticmethod
+    def zero_module(ring):
+        return FGModule(ring, [], name='(0)')
+
+    def span_submodule(self, generators, name=None):
+        submodule = FGModule(self.ring, generators, custom_mul=self.custom_mul, name=name)
+        return arrows.ModuleMorphism(submodule, self, lambda x: x)
+
+
+class FGModule(Module):
+    def __init__(self, base_ring, generators, name=None, custom_mul=None, **properties):
+        super().__init__(base_ring, name=name, no_generators=len(generators), custom_mul=custom_mul, **properties)
+        self.generators = generators
+
+    def __call__(self, coefficients):
+        if isinstance(coefficients, dict):
+            coefficients = [coefficients[g] if g in coefficients else self.ring.zero for g in self.generators]
+        return ModuleElement(self, coefficients)
+
+    @property
+    def zero(self):
+        return self([self.ring.zero] * self.no_generators)
+
+    def __str__(self):
+        return self.name
+
+    def add(self, a, b):
+        return self([a + b for a, b in zip(a.coefficients, b.coefficients)])
+
+    def scalar_mul(self, element, scalar):
+        return self([c*self.custom_mul(scalar, g) for g, c in zip(element.generators, element.coefficients)])
+
+    def info(self):
+        print(self.name + ': finitely generated ' + str(self.ring) + '-module')
+        print(str(self.no_generators) + f' generator{"s" if self.no_generators > 1 else ""}')
+        print('<' + ', '.join([str(g) for g in self.generators]) + '>')
+        print(', '.join(filter(lambda x: self.properties[x], self.properties().keys())))
+        print()
+
+
+class FreeModule(Module):
+    def __init__(self, base_ring, name=None, no_generators=None, **properties):
+        super().__init__(base_ring, name=name, no_generators=no_generators, free=True, **properties)
+
+
+class FreeFGModule(FGModule):
+    def __init__(self, base_ring, no_generators, name=None, generator_names=None, **properties):
+        generators = generator_names or [f'v_{i}' for i in range(no_generators)]
+        if name is None:
+            name = str(base_ring) + '^' + str(no_generators)
+        if no_generators == 1:
+            generators = generator_names or ['']
+            name = str(base_ring)
+        super().__init__(base_ring, generators, name=name, **properties)
+
+
+class ModuleElement:
+    def __init__(self, module, coefficients):
+        self.ring = coefficients[0].ring
+        self.module = module
+        if isinstance(coefficients, dict):
+            self.coefficients_dict = coefficients
+            self.coefficients = None
+            self.fg = False
+        else:
+            self.coefficients = coefficients
+            self.coefficients_dict = {g: c for g, c in zip(self.module.generators, self.coefficients)}
+            self.fg = True
+
+    def __str__(self):
+        if self.module.properties['ideal']:
+            return str(self.module.as_ring_element(self))
+        if self.coefficients_dict == {}:
+            return '0'
+        if self.fg:
+            return ' + '.join([str(c) + '*' + str(g) for g, c in zip(self.module.generators, self.coefficients)])
+        return ' + '.join([str(self.coefficients_dict[g]) + '*' + str(g) for g in self.coefficients_dict.keys()])
+
+    def __add__(self, other):
+        return self.module.add(self, other)
+
+    def __mul__(self, scalar):
+        assert isinstance(scalar, BaseElement)
+        assert scalar.ring == self.ring
+
+        return self.module.scalar_mul(self, scalar)
+
+    def __neg__(self):
+        return self.module.scalar_mul(self, -self.ring.one())
+
+    def __eq__(self, other):
+        if other == 0:
+            return self == self.module.zero
+        return self.coefficients == other.coefficients
+
+    def __ne__(self, other):
+        return not self.coefficients == other.coefficients
+
+    def __sub__(self, other):
+        return self.module.add(self, -other)
+
+    @functools.cached_property
+    def grad(self):
+        if not self.module.properties['graded']:
+            return None
+        return self.module.grade(self)
+
+    def maybe_is_zero(self):
+        return all([self.ring.maybe_zero_check(c) for c in self.coefficients])
+
+    def force_is_zero(self):
+        return all([self.ring.force_zero_check(c) for c in self.coefficients])
+
+    def __call__(self):
+        return self.module.to_ring_element(self)
 
 
 class Ideal(FGModule):
-    def __init__(self, generators, name="", **properties):
+    def __init__(self, generators, name=None, **properties):
         for g in generators:
             assert isinstance(g, BaseElement)
 
-        generators = list(filter(lambda x: not x == generators[0].ring.zero, generators))
+        if all([g == generators[0].ring.zero for g in generators]):
+            generators = [generators[0]]
+        else:
+            generators = list(filter(lambda x: not x == generators[0].ring.zero, generators))
 
-        if name == "":
-            name = '(' + ', '.join([str(g) for g in generators]) + ')'
+        name = name or '(' + ', '.join([str(g) for g in generators]) + ')'
 
         properties['ideal'] = True
         super().__init__(generators[0].ring, generators, name=name, **properties)
@@ -25,11 +197,11 @@ class Ideal(FGModule):
     def as_ring_element(self, element):
         return sum([c * g for c, g in zip(element.coefficients, self.generators)], start=self.ring.zero)
 
-    def quotient_algebra(self):
-        return QuotientAlgebra(self.ring, self)
+    def quotient_algebra(self, name=None):
+        return QuotientAlgebra(self, name)
 
     @staticmethod
-    def zero_deal(ring):
+    def zero_ideal(ring):
         return Ideal([ring.zero], name='(0)')
 
 
@@ -37,6 +209,7 @@ class PolynomialIdeal(Ideal):
     def __init__(self, generators, name="", groebner=None, **properties):
         super().__init__(generators, name=name, **properties)
         self.groebner_basis = groebner
+        assert isinstance(self.ring, PolynomialAlgebra)
         self.order = self.ring.order
 
     def info(self):
@@ -49,10 +222,10 @@ class PolynomialIdeal(Ideal):
         print()
 
 
-
 class KPolynomialIdeal(PolynomialIdeal):
     def __init__(self, generators, name="", groebner=None, find_groebner=False, **properties):
         super().__init__(generators, name=name, groebner=groebner, **properties)
+        assert isinstance(self.ring, KPolynomialAlgebra)
         if find_groebner:
             self.to_groebner()
 
@@ -228,6 +401,16 @@ class KMonomialIdeal:
     def __contains__(self, item):
         return any([item.value.divisible_by(m) for m in self.monomials])
 
+
+class VectorSpace(FreeModule):
+    def __init__(self, base_ring, name=None, no_generators=None, **properties):
+        super().__init__(self, base_ring, name=name, no_generators=no_generators, vector_space=True, **properties)
+
+
+class FGVectorSpace(VectorSpace, FreeFGModule):
+    def __init__(self, base_ring, no_generators, name=None, generator_names=None, **properties):
+        VectorSpace.__init__(self, base_ring, name=name, no_generators=no_generators, **properties)
+        FreeFGModule.__init__(self, base_ring, no_generators, name=name, generator_names=generator_names, vector_space=True, **properties)
 
 
 

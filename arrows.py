@@ -1,6 +1,5 @@
-import types
-
 from modules import *
+from algebras import *
 
 
 class Morphism(ABC):
@@ -22,6 +21,10 @@ class AlgebraMorphism(Morphism):
     def __call__(self, element):
         return element.value(self.images)
 
+    @staticmethod
+    def identity(algebra):
+        return AlgebraMorphism(algebra, algebra, lambda x: x)
+
 
 class ModuleMorphism(Morphism):
     def __init__(self, domain, codomain, function_on_generators):
@@ -34,6 +37,13 @@ class ModuleMorphism(Morphism):
 
     def matrix(self):
         return [self(g) for g in self.domain.generators]
+
+    def __str__(self):
+        return str(self.matrix())
+
+    @staticmethod
+    def identity(module):
+        return ModuleMorphism(module, module, lambda x: x)
 
 
 class CovariantFunctor(ABC):
@@ -51,7 +61,25 @@ class CovariantFunctor(ABC):
         pass
 
     def __str__(self):
-        return self.name + ': ' + str(self.domain) + '->' + str(self.codomain)
+        return self.name + ': ' + str(self.domain) + ' -> ' + str(self.codomain)
+
+
+class ContravariantFunctor(ABC):
+    def __init__(self, domain, codomain, name='F'):
+        self.domain = domain
+        self.codomain = codomain
+        self.name = name
+
+    @abstractmethod
+    def __call__(self, obj):
+        pass
+
+    @abstractmethod
+    def induced_morphism(self, morphism):
+        pass
+
+    def __str__(self):
+        return self.name + ': ' + str(self.domain) + '^op -> ' + str(self.codomain)
 
 
 class IdentityFunctor(CovariantFunctor):
@@ -80,21 +108,53 @@ class FreeAlgebra(CovariantFunctor):
 
 class ExtensionOfScalars(CovariantFunctor):
     def __init__(self, morphism_of_base_algebras):
-        def extended_module(module):
-            new_base = morphism_of_base_algebras.codomain
+        super().__init__(Module, Module, name='-(x)' + str(morphism_of_base_algebras.codomain))
+        self.new_base = morphism_of_base_algebras.codomain
+        self.morphism_of_base_algebras = morphism_of_base_algebras
+
+    def __call__(self, module):
+        return Module(self.codomain, module.generators, name=module.name,
+                      custom_mul=lambda c, g: self.morphism_of_base_algebras(c), **module.properties)
+
+    def induced_morphism(self, morphism):
+        return ModuleMorphism(self(morphism.domain), self(morphism.codomain), morphism.function_on_generators)
 
 
-class TensorAlgebra(CovariantFunctor):
-    def __init__(self, algebra):
-        self.algebra = algebra
-        self.base_ring = algebra.base_ring
+class TensorAlgebraOverBase(CovariantFunctor):
+    def __init__(self, new_algebra):
+        super().__init__(Algebra, Algebra, name='-(x)' + str(new_algebra))
+        self.new_algebra = new_algebra
 
-        def function_on_objects(algebra):
-            if isinstance(algebra, QuotientAlgebra) and algebra.base_ring == self.base_ring:
-                pass  # TODO: need extension of scalars
+    def __call__(self, algebra):
+        if isinstance(algebra, PolynomialAlgebra):
+            return PolynomialAlgebra(self.new_algebra, algebra.generators, order=algebra.order)
+        if isinstance(self.new_algebra, PolynomialAlgebra):
+            return PolynomialAlgebra(algebra, self.new_algebra.generators, order=self.new_algebra.order)
+        if isinstance(algebra, QuotientAlgebra) and isinstance(self.new_algebra, QuotientAlgebra):
+            bigger_free_algebra = PolynomialAlgebra(algebra.base_ring,
+                                                    algebra.no_generators + self.new_algebra.no_generators,
+                                                    variable_names=[f'x_{i}' for i in range(algebra.no_generators)] + [f'y_{i}' for i in range(self.new_algebra.no_generators)],
+                                                    order=algebra.order)
+            g1 = algebra.ideal.generators
+            g2 = self.new_algebra.ideal.generators
+            dim1 = algebra.no_generators
+            dim2 = self.new_algebra.no_generators
+            names1 = [f'x_{i}' for i in range(algebra.no_generators)]
+            names2 = [f'y_{i}' for i in range(self.new_algebra.no_generators)]
+            g = []
+            for poly in g1:
+                extended = list(map(lambda p: Polynomial(*list(map(lambda m: Monomial(m.coefficient, np.array(list(m.exponent_index) + [0]*dim2), names1), p.monomials))), poly.polynomials))
+                g.append(extended)
+            for poly in g2:
+                extended = list(map(lambda p: Polynomial(*list(map(lambda m: Monomial(m.coefficient, np.array([0]*dim1 + list(m.exponent_index)), names2), p.monomials))), poly.polynomials))
+                g.append(extended)
+            return QuotientAlgebra(bigger_free_algebra, Ideal(g, name=str(algebra) + '(x)' + str(self.new_algebra)))
+        raise NotImplementedError('Only tensor products of polynomial algebras and quotient algebras are implemented.')
 
-        def function_on_morphisms(function):
-            pass  # TODO: need extension of scalars
+    def induced_morphism(self, morphism):
+        raise NotImplementedError
+
+
 
 
 

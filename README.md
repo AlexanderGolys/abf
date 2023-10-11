@@ -8,6 +8,9 @@
 - Modules
 - Ideals, monomial ideals
 - Matrices
+- Groups
+- Graded rings
+- Graded modules, homogeneous ideals
 
 ## Implemented methods
 ### k-algebras

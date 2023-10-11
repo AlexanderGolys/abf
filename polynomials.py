@@ -1,6 +1,3 @@
-import functools
-
-import numpy as np
 from base_rings import *
 
 
@@ -184,6 +181,108 @@ class Monomial:
             return Monomial.create_one(self.no_variables, self.ring)
         return Monomial(self.coefficient ** other, self.exponent_index * other, self.var_names)
 
+    @staticmethod
+    def from_str(expression, ring=ZRing()):
+        """
+
+        'xy^2y^3z^4' -> 'xy'^2 * 'y'^4 * 'z'^4
+        'x y^2y^3z^4' -> 'x'^2 * 'y'^5 * 'z'^4
+
+        """
+        coef = ''
+        for c in expression:
+            if c not in '0123456789-':
+                break
+            coef += c
+        if coef == '':
+            coef = '1'
+        coef = ring.one * int(coef)
+        exponents = {}
+
+        for c in expression:
+            name = ''
+            while c != '^' and c != ' ':
+                name += c
+                c = next(expression)
+
+            name = name.replace(' ', '')
+
+            if c == ' ':
+                if name not in exponents:
+                    exponents[name] = 1
+                else:
+                    exponents[name] += 1
+                continue
+
+            c = next(expression)
+            if c == '{':
+                exponent = ''
+                while c != '}':
+                    exponent += c
+                    c = next(expression)
+
+                if name not in exponents:
+                    exponents[name] = int(exponent)
+                else:
+                    exponents[name] += int(exponent)
+                continue
+
+            if name not in exponents:
+                exponents[name] = int(c)
+            else:
+                exponents[name] += int(c)
+
+        var_names = sorted(expression.keys())
+        if len(var_names) == 0:
+            return Monomial(coef, [0])
+        return Monomial(coef, [exponents[x] for x in var_names], var_names)
+
+    @staticmethod
+    def from_str_simp(expression, ring=ZRing()):
+        """
+            'xy^2y^3z^4' -> 'x'^2 * 'y'^5 * 'z'^4
+            'x y^2y^3z^4' -> 'x'^2 * 'y'^5 * 'z'^4
+        """
+        expression = expression.replace(' ', '')
+        coef = ''
+        m = 0
+        for i, c in enumerate(expression):
+            if c not in '0123456789-':
+                m = i
+                break
+            coef += c
+        if coef == '':
+            coef = '1'
+        coef = ring.one * int(coef)
+        exponents = {}
+
+        for c in expression[m:]:
+            name = c
+            c = next(expression)
+
+            if c == '^':
+                c = next(expression)
+                if c == '{':
+                    exponent = ''
+                    while c != '}':
+                        exponent += c
+                        c = next(expression)
+
+                    if name not in exponents:
+                        exponents[name] = int(exponent)
+                    else:
+                        exponents[name] += int(exponent)
+                    continue
+            if name not in exponents:
+                exponents[name] = int(c)
+            else:
+                exponents[name] += int(c)
+
+        var_names = sorted(expression.keys())
+        if len(var_names) == 0:
+            return Monomial(coef, [0])
+        return Monomial(coef, [exponents[x] for x in var_names], var_names)
+
 
 class Polynomial:
     def __init__(self, *monomials, order=grlex):
@@ -261,7 +360,7 @@ class Polynomial:
         return self * -self.ring.one
 
     def __eq__(self, other):
-        return all([m1 == m2 for m1, m2 in zip(self.monomials, other.monomials)]) or self.degree == other.degree == -1
+        return self.degree == other.degree == -1 or all([m1 == m2 for m1, m2 in zip(self.monomials, other.monomials)])
 
     def __sub__(self, other):
         return self + (-other)
@@ -280,16 +379,27 @@ class Polynomial:
 
     @staticmethod
     def create_one(no_variables, coef_ring, order=grlex):
-        return Polynomial.from_monomial(Monomial.create_one(no_variables, coef_ring), order)
+        return Polynomial(Monomial.create_one(no_variables, coef_ring), order=order)
 
     @staticmethod
     def create_zero(no_variables, coef_ring, order=grlex):
-        return Polynomial.from_monomial(Monomial.create_zero(no_variables, coef_ring), order)
+        return Polynomial(Monomial.create_zero(no_variables, coef_ring), order=order)
 
     @property
     def monomial(self):
         return len(self.monomials) == 1
 
+    @staticmethod
+    def from_str(expression, ring=ZRing(), order=grlex):
+        expression = expression.replace('-', '+-')
+        mono_expressions = expression.split('+')
+        return Polynomial(*[Monomial.from_str(m, ring) for m in mono_expressions], order=order)
+
+    @staticmethod
+    def from_str_simp(expression, ring=ZRing(), order=grlex):
+        expression = expression.replace('-', '+-')
+        mono_expressions = expression.split('+')
+        return Polynomial(*[Monomial.from_str_simp(m, ring) for m in mono_expressions], order=order)
 
 
 
